@@ -87,6 +87,25 @@ input.missing { border-color: var(--warn); background: var(--warn-bg); }
 textarea { font: 12.5px/1.45 var(--mono); width: 100%; min-height: 150px; resize: vertical; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre; overflow: auto; }
 .privacy { font-size: .85rem; color: var(--muted); }
 .example-banner { font-size: .82rem; background: var(--warn-bg); color: var(--warn); padding: 6px 10px; border-radius: 6px; }
+
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th { text-align: left; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 8px 10px; background: var(--bg); white-space: nowrap; }
+td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: middle; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.cur td { background: var(--bg); font-weight: 600; }
+tr.best td:first-child { box-shadow: inset 3px 0 0 var(--ok); }
+.gain { color: var(--ok); font-weight: 600; }
+.loss { color: var(--err); font-weight: 600; }
+.cmp { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+.cmp h3 { margin: 0; font-size: .95rem; }
+.cmp .foot { font-size: .8rem; color: var(--muted); margin: 0; }
+.cmp .msg { margin: 0; color: var(--warn); background: var(--warn-bg); padding: 8px 10px; border-radius: 6px; font-size: .88rem; }
+#offTbl input, #offTbl select { padding: 5px 7px; font-size: 13px; min-width: 90px; }
+#offTbl td.n input { text-align: right; min-width: 80px; }
+details summary { cursor: pointer; font-weight: 600; }
+details .inner { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+.mini { min-height: 110px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
@@ -95,7 +114,7 @@ textarea { font: 12.5px/1.45 var(--mono); width: 100%; min-height: 150px; resize
 <div class="wrap">
   <header>
     <h1>Lettore Bollette</h1>
-    <p class="lead">Carica le bollette di luce e gas in PDF. L'app legge il testo e compila i dati della fornitura, dei consumi e dell'offerta. Controlla i campi, correggi quelli segnati in giallo e copia il risultato.</p>
+    <p class="lead">Carica le bollette di luce e gas in PDF. L'app legge il testo e compila i dati della fornitura, dei consumi e dell'offerta. Controlla i campi, correggi quelli segnati in giallo e copia il risultato. Sotto ogni bolletta trovi il confronto con le offerte dell'elenco, che puoi aggiornare.</p>
   </header>
 
   <section class="drop" id="drop" aria-label="Caricamento bollette">
@@ -109,6 +128,30 @@ textarea { font: 12.5px/1.45 var(--mono); width: 100%; min-height: 150px; resize
   <div id="status" role="status" aria-live="polite"></div>
 
   <section id="results" style="display:flex;flex-direction:column;gap:16px"></section>
+
+  <section class="card" id="offers">
+    <div class="card-head"><h2>Offerte da confrontare</h2><span class="tags"><span class="pill" id="offCount"></span></span></div>
+    <p class="privacy">L'elenco resta salvato in questo browser. Modifica le celle, aggiungi o togli righe, oppure importa una tabella con le colonne Fornitore, Offerta, Energia, Prezzo, Quota fissa/mese.</p>
+    <div class="tbl"><table id="offTbl"></table></div>
+    <div class="btns">
+      <button id="offAdd" type="button">Aggiungi offerta</button>
+      <button id="offReset" type="button">Ripristina elenco iniziale</button>
+    </div>
+    <details>
+      <summary>Incolla o importa una tabella</summary>
+      <div class="inner">
+        <p class="privacy">Copia la tabella da Excel o Fogli Google e incollala qui sotto, oppure scegli un file CSV. Il prezzo può essere scritto come "€ 0,1652/kWh". L'intestazione viene riconosciuta e saltata.</p>
+        <textarea id="pasteBox" class="mini" style="white-space:pre" aria-label="Tabella offerte da incollare"></textarea>
+        <div class="btns">
+          <button id="offReplace" type="button">Sostituisci elenco</button>
+          <button id="offAppend" type="button">Aggiungi in coda</button>
+          <input type="file" id="csvFile" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+          <button id="csvPick" type="button">Scegli file CSV</button>
+        </div>
+        <span id="offMsg" class="privacy" role="status" aria-live="polite"></span>
+      </div>
+    </details>
+  </section>
 
   <section class="card export" id="export" hidden>
     <h2>Esporta</h2>
@@ -417,6 +460,7 @@ function parseBill(raw) {
         html += '<div class="field' + (f.wide ? ' wide' : '') + '"><label for="' + id + '">' + f.l + '</label>' + body + '<span class="where">' + f.w + '</span>' + note + '</div>';
       });
       html += '</div>';
+      html += '<div class="cmp" id="cmp' + b.id + '">' + cmpHtml(b) + '</div>';
       card.innerHTML = html;
       box.appendChild(card);
     });
@@ -432,7 +476,9 @@ function parseBill(raw) {
     ['Prezzo unitario', 'prezzoUnitario'], ['Unita prezzo', 'unitaPrezzo'],
     ['Tariffa', 'tariffa'], ['Quota fissa vendita', 'quotaFissaPrezzo'], ['Unita quota fissa', 'quotaFissaUnita'],
     ['Quota fissa importo', 'quotaFissaImporto'], ['Formula variabile', 'formula'],
-    ['Consumo annuo', 'consumoAnnuo'], ['Unita consumo annuo', 'unitaAnnuo'], ['Nota consumo annuo', 'consumoAnnuoNote']
+    ['Consumo annuo', 'consumoAnnuo'], ['Unita consumo annuo', 'unitaAnnuo'], ['Nota consumo annuo', 'consumoAnnuoNote'],
+    ['Migliore offerta', function (b) { var c = compare(b.data); return c.rows && c.rows.length ? c.rows[0].f + ' - ' + c.rows[0].o : ''; }],
+    ['Risparmio annuo migliore (EUR)', function (b) { var c = compare(b.data); return c.rows && c.rows.length ? Math.round(c.rows[0].risp * 100) / 100 : ''; }]
   ];
   function buildExport() {
     var rows = bills.map(function (b) {
@@ -459,6 +505,140 @@ function parseBill(raw) {
     function fallback() { var ta = $('out'); ta.value = text; ta.focus(); ta.select(); done(false); }
     try { navigator.clipboard.writeText(text).then(function () { done(true); }, fallback); } catch (e) { fallback(); }
   }
+
+
+  /* ---------- Offerte e confronto ---------- */
+  var DEFAULT_OFFERS = [
+    { f: 'MAGIS', o: 'MIA LUCE FIX SMART', e: 'Luce', p: 0.1652, q: 10 },
+    { f: 'AUDAX', o: 'SICURA VERDE CASA FASCE', e: 'Luce', p: 0.1573, q: 15 },
+    { f: 'NUOVE ENERGIE', o: 'SEMPLICE LUCE FIX', e: 'Luce', p: 0.1470, q: 12 },
+    { f: 'MAGIS', o: 'MIA GAS FIX SMART', e: 'Gas', p: 0.7680, q: 10 },
+    { f: 'AUDAX', o: 'SICURA ECO GAS', e: 'Gas', p: 0.6140, q: 15 },
+    { f: 'NUOVE ENERGIE', o: 'SEMPLICE GAS FIX', e: 'Gas', p: 0.6000, q: 12 }
+  ];
+  var OFFERS = loadOffers();
+  function loadOffers() {
+    try {
+      var s = localStorage.getItem('lb_offerte');
+      if (s) { var a = JSON.parse(s); if (Array.isArray(a)) return a; }
+    } catch (e) {}
+    return JSON.parse(JSON.stringify(DEFAULT_OFFERS));
+  }
+  function saveOffers() { try { localStorage.setItem('lb_offerte', JSON.stringify(OFFERS)); } catch (e) {} }
+
+  function eur(n) { return n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
+  function eurSigned(n) { return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
+  function price(n) { return n.toLocaleString('it-IT', { minimumFractionDigits: 4, maximumFractionDigits: 6 }); }
+  function feeAnnual(q, unit) {
+    unit = String(unit || '');
+    if (/anno/i.test(unit)) return q;
+    if (/giorno/i.test(unit)) return q * 365;
+    return q * 12;
+  }
+
+  function compare(d) {
+    var A = d.consumoAnnuo, P = d.prezzoUnitario, Q = d.quotaFissaPrezzo;
+    var miss = [];
+    if (!d.tipoUtenza) miss.push('tipo di utenza');
+    if (A === '' || A == null) miss.push('consumo annuo');
+    if (P === '' || P == null) miss.push('prezzo unitario');
+    if (Q === '' || Q == null) miss.push('quota fissa');
+    if (miss.length) return { msg: 'Per il confronto servono ancora: ' + miss.join(', ') + '.' };
+    var cur = A * P + feeAnnual(Q, d.quotaFissaUnita);
+    var rows = OFFERS.filter(function (x) { return x.e === d.tipoUtenza && typeof x.p === 'number' && typeof x.q === 'number'; })
+      .map(function (x) {
+        var costo = A * x.p + x.q * 12;
+        return { f: x.f, o: x.o, p: x.p, q: x.q, costo: costo, risp: cur - costo, perc: cur ? (cur - costo) / cur * 100 : 0 };
+      })
+      .sort(function (a, b) { return a.costo - b.costo; });
+    return { cur: cur, rows: rows, A: A };
+  }
+
+  function cmpHtml(b) {
+    var d = b.data;
+    var c = compare(d);
+    var h = '<h3>Confronto con le offerte ' + (d.tipoUtenza ? 'di ' + d.tipoUtenza.toLowerCase() : '') + '</h3>';
+    if (c.msg) return h + '<p class="msg">' + esc(c.msg) + '</p>';
+    if (!c.rows.length) return h + '<p class="msg">Nessuna offerta di ' + esc(d.tipoUtenza.toLowerCase()) + ' nell\'elenco.</p>';
+    var u = d.unitaConsumo || (d.tipoUtenza === 'Gas' ? 'Smc' : 'kWh');
+    h += '<div class="tbl"><table><thead><tr><th>Fornitore</th><th>Offerta</th><th class="n">Prezzo €/' + u + '</th><th class="n">Quota fissa €/mese</th><th class="n">Costo annuo</th><th class="n">Risparmio/anno</th><th class="n">%</th></tr></thead><tbody>';
+    h += '<tr class="cur"><td>' + esc(d.fornitore || 'Attuale') + '</td><td>Offerta attuale</td><td class="n">' + price(d.prezzoUnitario) + '</td><td class="n">' + eur(feeAnnual(d.quotaFissaPrezzo, d.quotaFissaUnita) / 12).replace(' €', '') + '</td><td class="n">' + eur(c.cur) + '</td><td class="n">—</td><td class="n">—</td></tr>';
+    c.rows.forEach(function (r, i) {
+      var cls = r.risp > 0 ? 'gain' : r.risp < 0 ? 'loss' : '';
+      h += '<tr' + (i === 0 && r.risp > 0 ? ' class="best"' : '') + '><td>' + esc(r.f) + '</td><td>' + esc(r.o) + '</td><td class="n">' + price(r.p) + '</td><td class="n">' + eur(r.q).replace(' €', '') + '</td><td class="n">' + eur(r.costo) + '</td><td class="n ' + cls + '">' + eurSigned(r.risp) + '</td><td class="n ' + cls + '">' + (r.perc > 0 ? '+' : r.perc < 0 ? '−' : '') + Math.abs(r.perc).toFixed(1).replace('.', ',') + '%</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    var f = 'Calcolo: consumo annuo (' + (d.consumoAnnuo).toLocaleString('it-IT') + ' ' + u + (d.consumoAnnuoNote ? ', stimato' : '') + ') × prezzo unitario + quota fissa × 12 mesi. Conta solo la spesa per la vendita; rete, oneri e imposte non sono inclusi.';
+    if (d.tariffa === 'Variabile') f += ' La tua offerta è variabile, mentre quelle in elenco hanno prezzo fisso: il risparmio dipende dall\'andamento dell\'indice.';
+    return h + '<p class="foot">' + esc(f) + '</p>';
+  }
+  function updateCmp(b) { var el = document.getElementById('cmp' + b.id); if (el) el.innerHTML = cmpHtml(b); }
+  function refreshCmp() { bills.forEach(updateCmp); buildExport(); }
+
+  function renderOffers() {
+    var h = '<thead><tr><th>Fornitore</th><th>Offerta</th><th>Energia</th><th class="n">Prezzo €/kWh o €/Smc</th><th class="n">Quota fissa €/mese</th><th></th></tr></thead><tbody>';
+    OFFERS.forEach(function (x, i) {
+      var idp = 'o' + i + '_';
+      h += '<tr><td><input type="text" id="' + idp + 'f" data-oi="' + i + '" data-ok="f" value="' + esc(x.f || '') + '" aria-label="Fornitore"></td>' +
+        '<td><input type="text" id="' + idp + 'o" data-oi="' + i + '" data-ok="o" value="' + esc(x.o || '') + '" aria-label="Offerta"></td>' +
+        '<td><select id="' + idp + 'e" data-oi="' + i + '" data-ok="e" aria-label="Energia"><option' + (x.e === 'Luce' ? ' selected' : '') + '>Luce</option><option' + (x.e === 'Gas' ? ' selected' : '') + '>Gas</option></select></td>' +
+        '<td class="n"><input type="text" id="' + idp + 'p" data-oi="' + i + '" data-ok="p" data-t="num" value="' + (typeof x.p === 'number' ? String(x.p).replace('.', ',') : '') + '" aria-label="Prezzo"></td>' +
+        '<td class="n"><input type="text" id="' + idp + 'q" data-oi="' + i + '" data-ok="q" data-t="num" value="' + (typeof x.q === 'number' ? String(x.q).replace('.', ',') : '') + '" aria-label="Quota fissa al mese"></td>' +
+        '<td><button type="button" data-orm="' + i + '">Elimina</button></td></tr>';
+    });
+    h += '</tbody>';
+    $('offTbl').innerHTML = h;
+    var nL = OFFERS.filter(function (x) { return x.e === 'Luce'; }).length;
+    $('offCount').textContent = nL + ' luce, ' + (OFFERS.length - nL) + ' gas';
+  }
+
+  function offerNum(s) { var m = String(s).match(/\d[\d.]*(?:,\d+)?|\d+(?:[.]\d+)?/); if (!m) return ''; var v = m[0]; return parseFloat(v.indexOf(',') >= 0 ? v.replace(/\./g, '').replace(',', '.') : v); }
+  function parseOffers(text) {
+    var lines = String(text).split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+    var recs = [];
+    var delim = /\t|;/.test(text);
+    if (delim) {
+      lines.forEach(function (l) { var c = l.split(/\t|;/).map(function (x) { return x.trim(); }); if (c.length >= 5) recs.push(c); });
+    } else {
+      if (lines.length && /^fornitore$/i.test(lines[0])) lines = lines.slice(5);
+      for (var i = 0; i + 4 < lines.length; i += 5) recs.push(lines.slice(i, i + 5));
+    }
+    return recs.filter(function (c) { return !/^fornitore$/i.test(c[0]); }).map(function (c) {
+      return { f: c[0], o: c[1], e: /gas/i.test(c[2]) ? 'Gas' : 'Luce', p: offerNum(c[3]), q: offerNum(c[4]) };
+    }).filter(function (x) { return x.f && x.o && typeof x.p === 'number'; });
+  }
+  function importOffers(text, replace) {
+    var list = parseOffers(text);
+    if (!list.length) { $('offMsg').textContent = 'Non ho trovato offerte valide. Servono cinque colonne: Fornitore, Offerta, Energia, Prezzo, Quota fissa/mese.'; return; }
+    OFFERS = replace ? list : OFFERS.concat(list);
+    saveOffers(); renderOffers(); refreshCmp();
+    $('offMsg').textContent = (replace ? 'Elenco sostituito: ' : 'Aggiunte ') + list.length + ' offerte.';
+  }
+
+  $('offTbl').addEventListener('input', function (e) {
+    var i = e.target.getAttribute && e.target.getAttribute('data-oi');
+    if (i == null) return;
+    var k = e.target.getAttribute('data-ok');
+    OFFERS[+i][k] = e.target.getAttribute('data-t') === 'num' ? parseNum(e.target.value) : e.target.value;
+    saveOffers(); refreshCmp();
+    if (k === 'e') renderOffers();
+  });
+  $('offTbl').addEventListener('click', function (e) {
+    var i = e.target.getAttribute && e.target.getAttribute('data-orm');
+    if (i == null) return;
+    OFFERS.splice(+i, 1); saveOffers(); renderOffers(); refreshCmp();
+  });
+  $('offAdd').addEventListener('click', function () { OFFERS.push({ f: '', o: '', e: 'Luce', p: '', q: '' }); saveOffers(); renderOffers(); });
+  $('offReset').addEventListener('click', function () { OFFERS = JSON.parse(JSON.stringify(DEFAULT_OFFERS)); saveOffers(); renderOffers(); refreshCmp(); $('offMsg').textContent = 'Elenco iniziale ripristinato.'; });
+  $('offReplace').addEventListener('click', function () { importOffers($('pasteBox').value, true); });
+  $('offAppend').addEventListener('click', function () { importOffers($('pasteBox').value, false); });
+  $('csvPick').addEventListener('click', function () { $('csvFile').click(); });
+  $('csvFile').addEventListener('change', function (e) {
+    var f = e.target.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () { $('pasteBox').value = String(r.result); importOffers(String(r.result), true); };
+    r.readAsText(f); e.target.value = '';
+  });
 
   async function readPdf(file) {
     var buf = await file.arrayBuffer();
@@ -541,6 +721,7 @@ function parseBill(raw) {
     if (el.tagName === 'SELECT') render();
     else {
       el.classList.toggle('missing', el.value.trim() === '' && k !== 'formula');
+      updateCmp(b);
       buildExport();
     }
   }
@@ -553,6 +734,7 @@ function parseBill(raw) {
   if (window.pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
+  renderOffers();
   loadExample();
 })();
 </script>
