@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>:root{color-scheme:light}body{margin:0}[hidden]{display:none!important}</style>
+<title>Lettore Bollette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<style>
+/* Layout: colonna unica, area di caricamento in alto, una scheda per bolletta, pannello di esportazione in fondo */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --fg: #16212c;
+  --muted: #5b6b7a;
+  --line: #d3dae1;
+  --accent: #0d6b6e;
+  --accent-fg: #ffffff;
+  --luce: #a8670a;
+  --luce-bg: #fbefd7;
+  --gas: #2455a8;
+  --gas-bg: #dfe9f8;
+  --warn: #9a5b00;
+  --warn-bg: #fff3d6;
+  --ok: #1d7a46;
+  --err: #b3261e;
+  --font: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1820; --surface: #17232e; --fg: #e5ecf2; --muted: #93a4b3; --line: #2a3a48;
+    --accent: #4fc3c6; --accent-fg: #07262a;
+    --luce: #f0b455; --luce-bg: #3a2c12; --gas: #7fb0ff; --gas-bg: #1a2b47;
+    --warn: #f0b455; --warn-bg: #3a2c12; --ok: #5fcf8e; --err: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1820; --surface: #17232e; --fg: #e5ecf2; --muted: #93a4b3; --line: #2a3a48;
+  --accent: #4fc3c6; --accent-fg: #07262a;
+  --luce: #f0b455; --luce-bg: #3a2c12; --gas: #7fb0ff; --gas-bg: #1a2b47;
+  --warn: #f0b455; --warn-bg: #3a2c12; --ok: #5fcf8e; --err: #ff8a80;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font); padding-inline: 16px; padding-block: 28px 56px; }
+.wrap { max-width: 980px; margin-inline: auto; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.1; margin: 0; letter-spacing: -0.02em; text-wrap: balance; }
+h2 { font-size: 1.05rem; margin: 0; }
+.lead { color: var(--muted); max-width: 62ch; margin: 8px 0 0; }
+header { display: flex; flex-direction: column; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; background: var(--surface); padding: 22px 18px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: space-between; transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.drop p { margin: 0; min-width: 0; }
+.drop small { color: var(--muted); display: block; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; }
+button, .btn { font: inherit; font-weight: 600; cursor: pointer; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 8px 14px; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#status { color: var(--muted); font-size: .9rem; min-height: 1.3em; }
+#status.err { color: var(--err); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.card-head .name { font-weight: 600; word-break: break-word; min-width: 0; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pill { font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: var(--bg); color: var(--muted); }
+.pill.luce { background: var(--luce-bg); color: var(--luce); }
+.pill.gas { background: var(--gas-bg); color: var(--gas); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.pill.ok { background: color-mix(in srgb, var(--ok) 16%, var(--surface)); color: var(--ok); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px 14px; }
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.field.wide { grid-column: 1 / -1; }
+.field label { font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.field .where { font-size: .74rem; color: var(--muted); }
+.row2 { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+input, select { font: 14px var(--mono); color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; width: 100%; min-width: 0; }
+select { font-family: var(--font); }
+input.missing { border-color: var(--warn); background: var(--warn-bg); }
+.unit { font: 13px var(--mono); color: var(--muted); align-self: center; white-space: nowrap; }
+.note { font-size: .78rem; color: var(--warn); }
+.export { display: flex; flex-direction: column; gap: 10px; }
+textarea { font: 12.5px/1.45 var(--mono); width: 100%; min-height: 150px; resize: vertical; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre; overflow: auto; }
+.privacy { font-size: .85rem; color: var(--muted); }
+.example-banner { font-size: .82rem; background: var(--warn-bg); color: var(--warn); padding: 6px 10px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Lettore Bollette</h1>
+    <p class="lead">Carica le bollette di luce e gas in PDF. L'app legge il testo e compila i dati della fornitura, dei consumi e dell'offerta. Controlla i campi, correggi quelli segnati in giallo e copia il risultato.</p>
+  </header>
+
+  <section class="drop" id="drop" aria-label="Caricamento bollette">
+    <p><strong>Trascina qui i PDF</strong> oppure scegli i file.<small>Puoi caricare più bollette insieme. I file restano nel tuo browser e non vengono inviati a nessun server.</small></p>
+    <div class="btns">
+      <input type="file" id="file" accept="application/pdf,.pdf" multiple hidden>
+      <button class="primary" id="pick" type="button">Scegli PDF</button>
+      <button id="clear" type="button">Svuota elenco</button>
+    </div>
+  </section>
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <section id="results" style="display:flex;flex-direction:column;gap:16px"></section>
+
+  <section class="card export" id="export" hidden>
+    <h2>Esporta</h2>
+    <p class="privacy">Il formato CSV usa il punto e virgola e la virgola decimale, pronto per Excel in italiano.</p>
+    <div class="btns">
+      <button id="copyCsv" type="button">Copia CSV</button>
+      <button id="copyJson" type="button">Copia JSON</button>
+    </div>
+    <textarea id="out" readonly aria-label="Dati esportati"></textarea>
+  </section>
+</div>
+
+<script>
+function parseBill(raw) {
+  const t = String(raw || '').replace(/ /g, ' ').replace(/\s+/g, ' ');
+  const out = {
+    fornitore: '', tipoUtenza: '', segmento: '', codice: '',
+    periodoInizio: '', periodoFine: '',
+    consumo: '', unitaConsumo: '',
+    prezzoUnitario: '', unitaPrezzo: '', prezzoNote: '',
+    tariffa: '', quotaFissaPrezzo: '', quotaFissaUnita: '', quotaFissaImporto: '',
+    formula: '', consumoAnnuo: '', unitaAnnuo: '', consumoAnnuoNote: '', quotaFissaNote: ''
+  };
+  const num = s => s == null ? null : parseFloat(String(s).replace(/\./g, '').replace(',', '.'));
+  const MESI = { gennaio: 1, febbraio: 2, marzo: 3, aprile: 4, maggio: 5, giugno: 6, luglio: 7, agosto: 8, settembre: 9, ottobre: 10, novembre: 11, dicembre: 12 };
+  const iso = (d, m, y) => {
+    d = +d; m = +m; y = +y;
+    if (y < 100) y += 2000;
+    if (!(d >= 1 && d <= 31 && m >= 1 && m <= 12)) return '';
+    return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  };
+  const DATE = '(\\d{1,2})\\s*[\\/.\\-]\\s*(\\d{1,2})\\s*[\\/.\\-]\\s*(\\d{2,4})';
+  const DATE_TXT = '(\\d{1,2})\\s+(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\\s+(\\d{4})';
+  const toIso = (a, b, c) => MESI[String(b).toLowerCase()] ? iso(a, MESI[String(b).toLowerCase()], c) : iso(a, b, c);
+
+  // Fornitore
+  const nomi = ['Servizio Elettrico Nazionale', 'Enel Energia', 'Eni Plenitude', 'Plenitude', 'A2A Energia', 'Edison Energia', 'Edison', 'Hera Comm', 'Iren Mercato', 'Acea Energia', 'Sorgenia', 'Engie', 'Axpo', 'E.ON', 'Illumia', 'Wekiwi', 'NeN', 'Octopus Energy', 'Dolomiti Energia', 'AGSM AIM Energia', 'Alperia', 'Estra Energie', 'Duferco Energia', 'Green Network', 'Repower', 'Pulsee', 'Optima Italia', 'Eviva', 'Ascotrade', 'Metaenergia', 'Vivigas', 'Gas Sales', 'Enegan', 'Sinergas'];
+  nomi.unshift('Sinergy Lucegas');
+  let best = -1, bestName = '';
+  nomi.forEach(n => {
+    const re = new RegExp('(?:^|[^A-Za-z0-9])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z0-9])', 'i');
+    const m = re.exec(t);
+    if (m && (best < 0 || m.index < best)) { best = m.index; bestName = n; }
+  });
+  if (bestName) out.fornitore = bestName;
+  else {
+    const m = t.match(/(?:societ[àa] di vendita|fornitore|venditore)\s*:?\s*([A-ZÀ-Ü][\w&.'À-ü ]{2,45}?(?:S\.?p\.?A\.?|S\.?r\.?l\.?))/);
+    if (m) out.fornitore = m[1].trim();
+    else {
+      const re = /\b([A-Z][A-Za-z0-9&.' ]{2,40}?\s(?:S\.?p\.?A\.?|S\.?r\.?l\.?|Srl|Spa))(?![A-Za-z])/g;
+      let x;
+      while ((x = re.exec(t))) { if (!/distribuzione|ireti|unareti|areti|retipiu|inrete/i.test(x[1])) { out.fornitore = x[1].trim(); break; } }
+    }
+  }
+
+  // Tipo utenza
+  const luce = (t.match(/\bPOD\b|energia elettrica|\bkWh\b/gi) || []).length;
+  const gas = (t.match(/\bPDR\b|gas naturale|\bSmc\b/gi) || []).length;
+  if (luce || gas) out.tipoUtenza = luce >= gas ? 'Luce' : 'Gas';
+  const seg = t.match(/(?:tipo(?:logia)?\s+(?:di\s+)?(?:utenza|cliente|uso)|uso(?:\s+della\s+fornitura)?)\s*:?\s*(domestico(?: residente| non residente)?|non domestico|altri usi|business|condominio|usi diversi)/i);
+  if (seg) out.segmento = seg[1].charAt(0).toUpperCase() + seg[1].slice(1).toLowerCase();
+  else if (/canone di abbonamento alla televisione/i.test(t)) out.segmento = 'Domestico';
+  const cod = out.tipoUtenza === 'Gas' ? t.match(/\bPDR\b\s*:?\s*(\d{14})/i) : t.match(/\bPOD\b\s*:?\s*(IT\s?\d{3}\s?E\s?[\dA-Z]{8})/i);
+  if (cod) out.codice = cod[1].replace(/\s/g, '');
+
+  // Periodo
+  const reDal = new RegExp('dal\\s+(?:' + DATE + '|' + DATE_TXT + ')\\s+al\\s+(?:' + DATE + '|' + DATE_TXT + ')', 'gi');
+  let mm, pick = null;
+  while ((mm = reDal.exec(t))) {
+    const ctx = t.slice(Math.max(0, mm.index - 90), mm.index).toLowerCase();
+    if (/inizio\s+fornitura|da\s+inizio/.test(ctx.slice(-60))) continue;
+    const c = { m: mm, score: /period|fatturaz|competenza/.test(ctx) ? 1 : 0 };
+    if (!pick || c.score > pick.score) pick = c;
+    if (c.score) break;
+  }
+  const MES = '(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)';
+  const comp = t.match(new RegExp('periodo\\s+di\\s+competenza[^:]{0,40}:\\s*' + MES + '(?:\\s+(\\d{4}))?\\s*(?:[-–]|e|al)?\\s*(?:' + MES + ')?\\s*(\\d{4})', 'i'));
+  if (comp && !(pick && pick.score)) {
+    const y = +(comp[4] || comp[3] || comp[2]);
+    const m1 = MESI[comp[1].toLowerCase()];
+    const m2 = comp[3] && MESI[String(comp[3]).toLowerCase()] ? MESI[comp[3].toLowerCase()] : m1;
+    const fine = new Date(Date.UTC(y, m2, 0)).getUTCDate();
+    out.periodoInizio = iso(1, m1, y); out.periodoFine = iso(fine, m2, y);
+  } else if (pick) {
+    const g = pick.m;
+    out.periodoInizio = g[1] ? toIso(g[1], g[2], g[3]) : toIso(g[4], g[5], g[6]);
+    out.periodoFine = g[7] ? toIso(g[7], g[8], g[9]) : toIso(g[10], g[11], g[12]);
+  } else {
+    const r2 = new RegExp('period\\w*[^\\d]{0,40}' + DATE + '\\s*(?:-|–|a|al)\\s*' + DATE, 'i');
+    const m2 = t.match(r2);
+    if (m2) { out.periodoInizio = iso(m2[1], m2[2], m2[3]); out.periodoFine = iso(m2[4], m2[5], m2[6]); }
+  }
+
+  // Consumo fatturato
+  const UNIT = '(kWh|Smc|mc)';
+  const NUM = '(\\d{1,3}(?:\\.\\d{3})*(?:,\\d+)?|\\d+(?:,\\d+)?)';
+  const cons = [
+    new RegExp('consum[oi]\\s+(?:totale\\s+)?fatturat[oi][^\\d]{0,40}' + NUM + '\\s*' + UNIT, 'i'),
+    new RegExp('totale\\s+consum[oi][^\\d]{0,40}' + NUM + '\\s*' + UNIT, 'i'),
+    new RegExp('consum[oi]\\s+(?:del\\s+periodo|rilevat[oi]|stimat[oi])[^\\d]{0,40}' + NUM + '\\s*' + UNIT, 'i')
+  ];
+  for (const r of cons) {
+    const m = t.match(r);
+    if (m) { out.consumo = num(m[1]); out.unitaConsumo = m[2].toLowerCase() === 'kwh' ? 'kWh' : 'Smc'; break; }
+  }
+
+  if (out.consumo === '') {
+    const m = t.match(new RegExp('quota\\s+(?:per\\s+)?consumi\\s+' + NUM + '\\s*' + UNIT + '\\b', 'i')) ||
+      t.match(new RegExp('consumo\\s+da\\s+inizio\\s+fornitura\\s+' + NUM + '\\s*' + UNIT + '\\b', 'i'));
+    if (m) { out.consumo = num(m[1]); out.unitaConsumo = m[2].toLowerCase() === 'kwh' ? 'kWh' : 'Smc'; }
+  }
+
+  // Sezioni "di cui spesa per la vendita"
+  const DI_CUI = /di cui\s+spesa\s+per\s+la\s+vend\w{2,4}\s+(?:di\s+)?(?:energia\s+elettrica|gas(?:\s+naturale)?)/i;
+  function riga(headRe) {
+    const re = new RegExp(headRe.source, 'gi');
+    let h;
+    while ((h = re.exec(t))) {
+      const win = t.slice(h.index, h.index + 900);
+      const d = win.match(DI_CUI);
+      if (d) {
+        let rest = win.slice(d.index + d[0].length, d.index + d[0].length + 220);
+        const cut = rest.search(/di cui|quota fissa|quota potenza|quota energia|totale|imposte|oneri/i);
+        if (cut > 0) rest = rest.slice(0, cut);
+        return rest;
+      }
+    }
+    return '';
+  }
+  const lastNum = s => {
+    const a = s.match(/\d[\d.]*,\d+|\d+/g);
+    return a ? num(a[a.length - 1]) : '';
+  };
+
+  // Prezzo unitario (Quota per consumi)
+  const rc = riga(/quota\s+(?:per\s+)?consumi/);
+  if (rc) {
+    const p1 = rc.match(/(\d+,\d{2,6})\s*[€E@]?\s*[\/&|]\s*(kWh|Smc|mc)/i);
+    const p2 = rc.match(/€\s*\/\s*(kWh|Smc|mc)\s*(\d+,\d{2,6})/i);
+    const q = rc.match(new RegExp(NUM + '\\s*' + UNIT + '\\b', 'i'));
+    if (p1) { out.prezzoUnitario = num(p1[1]); out.unitaPrezzo = '€/' + (p1[2].toLowerCase() === 'kwh' ? 'kWh' : 'Smc'); }
+    else if (p2) { out.prezzoUnitario = num(p2[2]); out.unitaPrezzo = '€/' + (p2[1].toLowerCase() === 'kwh' ? 'kWh' : 'Smc'); }
+    else if (q) {
+      const amt = lastNum(rc.replace(q[0], ''));
+      const qty = num(q[1]);
+      if (amt && qty) {
+        out.prezzoUnitario = Math.round(amt / qty * 1e6) / 1e6;
+        out.unitaPrezzo = '€/' + (q[2].toLowerCase() === 'kwh' ? 'kWh' : 'Smc');
+        out.prezzoNote = 'calcolato: importo / consumo';
+      }
+    }
+    if (q && out.consumo === '') { out.consumo = num(q[1]); out.unitaConsumo = q[2].toLowerCase() === 'kwh' ? 'kWh' : 'Smc'; }
+  }
+  if (!out.unitaPrezzo && out.tipoUtenza) out.unitaPrezzo = out.tipoUtenza === 'Gas' ? '€/Smc' : '€/kWh';
+  if (!out.unitaConsumo && out.tipoUtenza) out.unitaConsumo = out.tipoUtenza === 'Gas' ? 'Smc' : 'kWh';
+
+  // Quota fissa
+  const rf = riga(/quota\s+fissa/);
+  if (rf) {
+    const f1 = rf.match(/(\d+,\d{2,6})\s*[€E@]?\s*[\/&|]\s*(?:punto\s*[\/&|]\s*)?(mese|anno|giorno)/i);
+    const f2 = rf.match(/€\s*\/\s*(?:punto\s*\/\s*)?(mese|anno|giorno)\s*(\d+,\d{2,6})/i);
+    if (f1) { out.quotaFissaPrezzo = num(f1[1]); out.quotaFissaUnita = '€/' + f1[2].toLowerCase(); }
+    else if (f2) { out.quotaFissaPrezzo = num(f2[2]); out.quotaFissaUnita = '€/' + f2[1].toLowerCase(); }
+    const hit = f1 || f2;
+    const after = hit ? rf.slice(hit.index + hit[0].length) : rf;
+    const am = after.match(/^\s*€?\s*(\d[\d.]*,\d{2})\b/);
+    if (am) out.quotaFissaImporto = num(am[1]);
+  } else {
+    const f = t.match(/quota\s+fissa[^\d]{0,60}(\d+,\d{2,6})\s*€?\s*\/\s*(?:punto\s*\/\s*)?(mese|anno|giorno)/i);
+    if (f) { out.quotaFissaPrezzo = num(f[1]); out.quotaFissaUnita = '€/' + f[2].toLowerCase(); }
+  }
+
+  // Quota fissa con tabella impaginata male (etichette separate dai valori):
+  // totale, poi vendita, poi rete. Si accetta solo se vendita + rete = totale.
+  if (out.quotaFissaPrezzo === '') {
+    const hre = /quota\s+fissa/gi;
+    let hh;
+    while ((hh = hre.exec(t)) && out.quotaFissaPrezzo === '') {
+      const seg = t.slice(hh.index, hh.index + 1500);
+      const pr = /(\d+,\d{2,6})\s*[€E@]?\s*[\/&|]\s*(mese|anno|giorno)\s+(\d+,\d{2})\s*€/g;
+      const pairs = [];
+      let x;
+      while ((x = pr.exec(seg)) && pairs.length < 3) pairs.push({ p: num(x[1]), u: x[2].toLowerCase(), a: num(x[3]) });
+      if (pairs.length === 3 && Math.abs(pairs[1].a + pairs[2].a - pairs[0].a) < 0.02) {
+        out.quotaFissaPrezzo = pairs[1].p;
+        out.quotaFissaUnita = '€/' + pairs[1].u;
+        out.quotaFissaImporto = pairs[1].a;
+        out.quotaFissaNote = 'Tabella letta fuori ordine: vendita + rete = totale quota fissa (' + String(pairs[0].a).replace('.', ',') + ' €). Controlla.';
+      }
+    }
+  }
+
+  // Tariffa fissa / variabile e formula
+  const reForm = /((?:PUN(?:\s*Index\w*)?|PSV|TTF|Indice\s+\w+)[^.]{0,90}?(?:\+|più)\s*(?:spread\s*)?\d+[,.]?\d*\s*(?:€\s*\/\s*(?:kWh|Smc|mc)|c€\s*\/\s*(?:kWh|Smc)|cent\w*)?)/i;
+  const fm = t.match(reForm);
+  const hasVar = /\bvariabile\b|indicizzat|\bPUN\b|\bPSV\b|\bTTF\b|\bspread\b/i.test(t);
+  const hasFix = /prezzo\s+(?:fisso|bloccato|fissato)|tariffa\s+fissa|offerta\s+(?:a\s+)?prezzo\s+fisso|prezzo\s+della\s+materia\s+prima\s+fisso|\bfisso\s+(?:per|12|24|36)/i.test(t);
+  const tipo = t.match(/tipologia\s+offerta\s*:?\s*(fissa|fisso|variabile)/i);
+  const fx = t.match(/formula\s+prevista[^:]{0,80}:\s*(.{5,140}?)[\s|]+(?:indice\s+di\s+riferimento|periodicit)/i);
+  const ix = t.match(/indice\s+di\s+riferimento\s*:\s*([A-Za-z]{2,12}(?:\s+Index(?:\s+GME)?)?)/i);
+  const sp = t.match(/spread\s*:\s*(\d+,\d+)\s*€\s*\/\s*(kWh|Smc)/i);
+  if (tipo) {
+    out.tariffa = /variabile/i.test(tipo[1]) ? 'Variabile' : 'Fissa';
+    if (out.tariffa === 'Variabile') {
+      const parts = [];
+      if (fx) parts.push(fx[1].trim());
+      if (ix) parts.push('indice ' + ix[1].trim());
+      if (sp) parts.push('spread ' + sp[1] + ' €/' + sp[2]);
+      if (parts.length) out.formula = parts.join(', ');
+      else if (fm) out.formula = fm[1].trim();
+    }
+  }
+  else if (fm) { out.formula = fm[1].trim(); out.tariffa = 'Variabile'; }
+  else if (hasVar && !hasFix) {
+    out.tariffa = 'Variabile';
+    if (ix || sp) out.formula = [ix ? 'indice ' + ix[1].trim() : '', sp ? 'spread ' + sp[1] + ' €/' + sp[2] : ''].filter(Boolean).join(', ');
+  } else if (hasFix && !hasVar) out.tariffa = 'Fissa';
+  else if (hasFix && hasVar) out.tariffa = /prezzo\s+fisso/i.test(t) && !/\bPUN\b|\bPSV\b/i.test(t) ? 'Fissa' : 'Variabile';
+
+  // Consumo annuo
+  const an = t.match(new RegExp('consum[oi]\\s+annu[oi][^\\d]{0,60}' + NUM + '\\s*' + UNIT, 'i')) ||
+    t.match(new RegExp('ultimi\\s+12\\s+mesi[^\\d]{0,60}' + NUM + '\\s*' + UNIT, 'i'));
+  if (an) { out.consumoAnnuo = num(an[1]); out.unitaAnnuo = an[2].toLowerCase() === 'kwh' ? 'kWh' : 'Smc'; }
+
+  // Stima del consumo annuo se non indicato: mensile x 12, bimestrale x 6
+  if (out.consumoAnnuo === '' && out.consumo !== '' && out.periodoInizio && out.periodoFine) {
+    const g = (new Date(out.periodoFine + 'T00:00:00Z') - new Date(out.periodoInizio + 'T00:00:00Z')) / 864e5 + 1;
+    if (g > 0) {
+      let molt, desc;
+      if (g >= 25 && g <= 35) { molt = 12; desc = 'periodo mensile (' + g + ' giorni): consumo x 12'; }
+      else if (g >= 55 && g <= 67) { molt = 6; desc = 'periodo bimestrale (' + g + ' giorni): consumo x 6'; }
+      else { molt = 365 / g; desc = 'periodo di ' + g + ' giorni: consumo x 365 / ' + g; }
+      out.consumoAnnuo = Math.round(out.consumo * molt);
+      out.unitaAnnuo = out.unitaConsumo;
+      out.consumoAnnuoNote = 'Stima, non presente in bolletta. ' + desc.charAt(0).toUpperCase() + desc.slice(1);
+    }
+  }
+
+  return out;
+}
+
+
+</script>
+<script>
+(function () {
+  var FIELDS = [
+    { k: 'fornitore', l: 'Fornitore attuale', w: 'Frontespizio e dati della fornitura', t: 'text' },
+    { k: 'tipoUtenza', l: 'Tipo di utenza', w: 'Frontespizio e dati della fornitura', t: 'sel', o: ['Luce', 'Gas'] },
+    { k: 'segmento', l: 'Uso', w: 'Dati della fornitura', t: 'text' },
+    { k: 'codice', l: 'POD / PDR', w: 'Dati della fornitura', t: 'text' },
+    { k: 'periodoInizio', l: 'Periodo: inizio', w: 'Dati di fatturazione', t: 'date' },
+    { k: 'periodoFine', l: 'Periodo: fine', w: 'Dati di fatturazione', t: 'date' },
+    { k: 'consumo', l: 'Consumo fatturato', w: 'Scontrino e dati dei consumi', t: 'num', u: 'unitaConsumo' },
+    { k: 'prezzoUnitario', l: 'Prezzo unitario applicato', w: 'Quota per consumi, riga "di cui spesa per la vendita"', t: 'num', u: 'unitaPrezzo', note: 'prezzoNote' },
+    { k: 'tariffa', l: 'Tariffa', w: "Box dell'offerta", t: 'sel', o: ['Fissa', 'Variabile'] },
+    { k: 'quotaFissaPrezzo', l: 'Quota fissa vendita', w: 'Quota fissa, riga "di cui spesa per la vendita"', t: 'num', u: 'quotaFissaUnita', note: 'quotaFissaNote' },
+    { k: 'quotaFissaImporto', l: 'Quota fissa: importo in fattura', w: 'Scontrino', t: 'num', u: '€' },
+    { k: 'consumoAnnuo', l: 'Consumo annuo', w: 'Informazioni sui consumi della fornitura', t: 'num', u: 'unitaAnnuo', note: 'consumoAnnuoNote' },
+    { k: 'formula', l: 'Formula tariffa variabile', w: "Box dell'offerta", t: 'text', wide: true }
+  ];
+  var bills = [];
+  var seq = 0;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function setStatus(msg, err) { var s = $('status'); s.textContent = msg || ''; s.className = err ? 'err' : ''; }
+  function fmtNum(v) { return v === '' || v == null ? '' : String(v).replace('.', ','); }
+  function parseNum(s) { s = String(s).trim().replace(/\s/g, ''); if (!s) return ''; var n = parseFloat(s.indexOf(',') >= 0 ? s.replace(/\./g, '').replace(',', '.') : s); return isNaN(n) ? '' : n; }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  function render() {
+    var box = $('results');
+    box.innerHTML = '';
+    bills.forEach(function (b) {
+      var d = b.data;
+      var missing = FIELDS.filter(function (f) { return f.k !== 'formula' && (d[f.k] === '' || d[f.k] == null); }).length;
+      if (d.tariffa === 'Variabile' && !d.formula) missing++;
+      var card = document.createElement('article');
+      card.className = 'card';
+      var kind = d.tipoUtenza === 'Gas' ? 'gas' : d.tipoUtenza === 'Luce' ? 'luce' : '';
+      var html = '<div class="card-head"><span class="name">' + esc(b.name) + '</span><span class="tags">' +
+        (b.example ? '<span class="pill warn">Esempio</span>' : '') +
+        (kind ? '<span class="pill ' + kind + '">' + d.tipoUtenza + '</span>' : '') +
+        (missing ? '<span class="pill warn">' + missing + ' da controllare</span>' : '<span class="pill ok">Completa</span>') +
+        '<button type="button" data-rm="' + b.id + '">Rimuovi</button></span></div>';
+      if (b.example) html += '<div class="example-banner">Questi dati vengono da un testo di prova, non da una tua bolletta.</div>';
+      if (b.warn) html += '<div class="example-banner">' + esc(b.warn) + '</div>';
+      html += '<div class="grid">';
+      FIELDS.forEach(function (f) {
+        var val = d[f.k];
+        var miss = (val === '' || val == null) && !(f.k === 'formula' && d.tariffa !== 'Variabile');
+        var inp;
+        var id = 'f' + b.id + '_' + f.k;
+        if (f.t === 'sel') {
+          inp = '<select id="' + id + '" data-b="' + b.id + '" data-k="' + f.k + '"><option value="">—</option>' +
+            f.o.map(function (o) { return '<option' + (o === val ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>';
+        } else if (f.t === 'date') {
+          inp = '<input type="date" id="' + id + '" data-b="' + b.id + '" data-k="' + f.k + '" value="' + esc(val || '') + '"' + (miss ? ' class="missing"' : '') + '>';
+        } else {
+          inp = '<input type="text" id="' + id + '" data-b="' + b.id + '" data-k="' + f.k + '" data-t="' + f.t + '" value="' + esc(f.t === 'num' ? fmtNum(val) : (val || '')) + '"' + (miss ? ' class="missing"' : '') + '>';
+        }
+        var unit = '';
+        if (f.u) unit = f.u.charAt(0) === '€' ? f.u : (d[f.u] || '');
+        var body = unit ? '<div class="row2">' + inp + '<span class="unit">' + esc(unit) + '</span></div>' : inp;
+        var note = f.note && d[f.note] ? '<span class="note">' + esc(d[f.note]) + '</span>' : '';
+        html += '<div class="field' + (f.wide ? ' wide' : '') + '"><label for="' + id + '">' + f.l + '</label>' + body + '<span class="where">' + f.w + '</span>' + note + '</div>';
+      });
+      html += '</div>';
+      card.innerHTML = html;
+      box.appendChild(card);
+    });
+    $('export').hidden = !bills.length;
+    buildExport();
+  }
+
+  var COLS = [
+    ['File', function (b) { return b.name; }],
+    ['Fornitore', 'fornitore'], ['Tipo utenza', 'tipoUtenza'], ['Uso', 'segmento'], ['POD/PDR', 'codice'],
+    ['Periodo inizio', 'periodoInizio'], ['Periodo fine', 'periodoFine'],
+    ['Consumo fatturato', 'consumo'], ['Unita consumo', 'unitaConsumo'],
+    ['Prezzo unitario', 'prezzoUnitario'], ['Unita prezzo', 'unitaPrezzo'],
+    ['Tariffa', 'tariffa'], ['Quota fissa vendita', 'quotaFissaPrezzo'], ['Unita quota fissa', 'quotaFissaUnita'],
+    ['Quota fissa importo', 'quotaFissaImporto'], ['Formula variabile', 'formula'],
+    ['Consumo annuo', 'consumoAnnuo'], ['Unita consumo annuo', 'unitaAnnuo'], ['Nota consumo annuo', 'consumoAnnuoNote']
+  ];
+  function buildExport() {
+    var rows = bills.map(function (b) {
+      return COLS.map(function (c) {
+        var v = typeof c[1] === 'function' ? c[1](b) : b.data[c[1]];
+        if (typeof v === 'number') return String(v).replace('.', ',');
+        return v == null ? '' : String(v);
+      });
+    });
+    var csv = [COLS.map(function (c) { return c[0]; })].concat(rows).map(function (r) {
+      return r.map(function (v) { return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(';');
+    }).join('\n');
+    var json = JSON.stringify(bills.map(function (b) {
+      var o = { file: b.name }; Object.keys(b.data).forEach(function (k) { if (k !== 'prezzoNote') o[k] = b.data[k]; }); return o;
+    }), null, 2);
+    $('out').value = csv;
+    $('out').dataset.csv = csv;
+    $('out').dataset.json = json;
+  }
+
+  function copy(text, btn) {
+    var label = btn.textContent;
+    function done(ok) { btn.textContent = ok ? 'Copiato' : 'Seleziona e copia a mano'; setTimeout(function () { btn.textContent = label; }, 1800); }
+    function fallback() { var ta = $('out'); ta.value = text; ta.focus(); ta.select(); done(false); }
+    try { navigator.clipboard.writeText(text).then(function () { done(true); }, fallback); } catch (e) { fallback(); }
+  }
+
+  async function readPdf(file) {
+    var buf = await file.arrayBuffer();
+    var pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    var text = '';
+    for (var p = 1; p <= pdf.numPages; p++) {
+      var page = await pdf.getPage(p);
+      var tc = await page.getTextContent();
+      var rowsMap = {};
+      tc.items.forEach(function (it) {
+        if (!it.str || !it.str.trim()) return;
+        var y = Math.round(it.transform[5] / 3);
+        (rowsMap[y] = rowsMap[y] || []).push({ x: it.transform[4], s: it.str });
+      });
+      Object.keys(rowsMap).map(Number).sort(function (a, b) { return b - a; }).forEach(function (y) {
+        text += rowsMap[y].sort(function (a, b) { return a.x - b.x; }).map(function (i) { return i.s; }).join(' ') + '\n';
+      });
+      text += '\n';
+    }
+    return text;
+  }
+
+  async function addFiles(list) {
+    var files = Array.prototype.filter.call(list, function (f) { return /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name); });
+    if (!files.length) { setStatus('Seleziona file in formato PDF.', true); return; }
+    if (typeof pdfjsLib === 'undefined') { setStatus('Il lettore PDF non si è caricato. Controlla la connessione e ricarica la pagina.', true); return; }
+    bills = bills.filter(function (b) { return !b.example; });
+    for (var i = 0; i < files.length; i++) {
+      setStatus('Lettura di ' + files[i].name + ' (' + (i + 1) + ' di ' + files.length + ')…');
+      try {
+        var text = await readPdf(files[i]);
+        var warn = '';
+        if (text.replace(/\s/g, '').length < 80) warn = 'Questo PDF non contiene testo selezionabile, forse è una scansione. Compila i campi a mano.';
+        bills.push({ id: ++seq, name: files[i].name, data: parseBill(text), warn: warn });
+      } catch (e) {
+        bills.push({ id: ++seq, name: files[i].name, data: parseBill(''), warn: 'Impossibile leggere il file: ' + (e && e.message ? e.message : 'errore sconosciuto') + '. Compila i campi a mano.' });
+      }
+    }
+    setStatus(files.length === 1 ? 'Bolletta letta.' : files.length + ' bollette lette.');
+    render();
+  }
+
+  var SAMPLE = 'Enel Energia S.p.A. Dati della fornitura Tipo di utenza: Uso domestico residente Codice POD IT001E12345678 ' +
+    'Periodo di fatturazione: dal 01/08/2026 al 30/09/2026 Consumo fatturato 412 kWh Offerta: Prezzo fisso Luce 24 mesi ' +
+    'Quota per consumi di cui spesa per la vendita di energia elettrica 412 kWh 0,11850 €/kWh 48,82 ' +
+    'Quota fissa di cui spesa per la vendita di energia elettrica 2 mesi 8,50 €/mese 17,00 Consumo annuo 2.350 kWh';
+
+  function loadExample() {
+    bills = [{ id: ++seq, name: 'esempio-bolletta-luce.pdf', example: true, data: parseBill(SAMPLE) }];
+    render();
+  }
+
+  $('pick').addEventListener('click', function () { $('file').click(); });
+  $('file').addEventListener('change', function (e) { addFiles(e.target.files); e.target.value = ''; });
+  $('clear').addEventListener('click', function () { bills = []; setStatus(''); render(); });
+  var drop = $('drop');
+  ['dragenter', 'dragover'].forEach(function (n) { drop.addEventListener(n, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave', 'drop'].forEach(function (n) { drop.addEventListener(n, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
+  drop.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files); });
+
+  $('results').addEventListener('click', function (e) {
+    var id = e.target && e.target.getAttribute && e.target.getAttribute('data-rm');
+    if (id) { bills = bills.filter(function (b) { return String(b.id) !== id; }); render(); }
+  });
+  function onEdit(e) {
+    var el = e.target; var bid = el.getAttribute && el.getAttribute('data-b');
+    if (!bid) return;
+    var b = bills.filter(function (x) { return String(x.id) === bid; })[0];
+    if (!b) return;
+    var k = el.getAttribute('data-k');
+    b.data[k] = el.getAttribute('data-t') === 'num' ? parseNum(el.value) : el.value;
+    if (k === 'consumoAnnuo') b.data.consumoAnnuoNote = '';
+    if (k === 'quotaFissaPrezzo') b.data.quotaFissaNote = '';
+    if (k === 'tipoUtenza') {
+      var g = el.value === 'Gas';
+      if (!b.data.unitaConsumo || /^(kWh|Smc)$/.test(b.data.unitaConsumo)) b.data.unitaConsumo = g ? 'Smc' : 'kWh';
+      if (!b.data.unitaPrezzo || /^€\/(kWh|Smc)$/.test(b.data.unitaPrezzo)) b.data.unitaPrezzo = g ? '€/Smc' : '€/kWh';
+      if (!b.data.unitaAnnuo || /^(kWh|Smc)$/.test(b.data.unitaAnnuo)) b.data.unitaAnnuo = g ? 'Smc' : 'kWh';
+    }
+    if (el.tagName === 'SELECT') render();
+    else {
+      el.classList.toggle('missing', el.value.trim() === '' && k !== 'formula');
+      buildExport();
+    }
+  }
+  $('results').addEventListener('input', onEdit);
+  $('results').addEventListener('change', onEdit);
+
+  $('copyCsv').addEventListener('click', function (e) { copy($('out').dataset.csv || '', e.target); });
+  $('copyJson').addEventListener('click', function (e) { copy($('out').dataset.json || '', e.target); });
+
+  if (window.pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  loadExample();
+})();
+</script>
+</body>
+</html>
