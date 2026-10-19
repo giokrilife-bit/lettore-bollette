@@ -222,14 +222,17 @@ function parseBill(raw) {
   let mm, pick = null;
   while ((mm = reDal.exec(t))) {
     const ctx = t.slice(Math.max(0, mm.index - 90), mm.index).toLowerCase();
-    if (/inizio\s+fornitura|da\s+inizio/.test(ctx.slice(-60))) continue;
+    if (/inizio\s+fornitura|da\s+inizio|annu[oa]|ultimi\s+12|12\s+mesi/.test(ctx.slice(-70))) continue;
     const c = { m: mm, score: /period|fatturaz|competenza/.test(ctx) ? 1 : 0 };
     if (!pick || c.score > pick.score) pick = c;
     if (c.score) break;
   }
   const MES = '(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)';
   const comp = t.match(new RegExp('periodo\\s+di\\s+competenza[^:]{0,40}:\\s*' + MES + '(?:\\s+(\\d{4}))?\\s*(?:[-–]|e|al)?\\s*(?:' + MES + ')?\\s*(\\d{4})', 'i'));
-  if (comp && !(pick && pick.score)) {
+  const expl = t.match(new RegExp('period\\w*\\s+(?:fatturat\\w*|di\\s+riferimento|di\\s+fatturazione)\\s*:?\\s*' + DATE + '\\s*(?:[-–]|a|al)\\s*' + DATE, 'i'));
+  if (expl && iso(expl[1], expl[2], expl[3]) && iso(expl[4], expl[5], expl[6])) {
+    out.periodoInizio = iso(expl[1], expl[2], expl[3]); out.periodoFine = iso(expl[4], expl[5], expl[6]);
+  } else if (comp && !(pick && pick.score)) {
     const y = +(comp[4] || comp[3] || comp[2]);
     const m1 = MESI[comp[1].toLowerCase()];
     const m2 = comp[3] && MESI[String(comp[3]).toLowerCase()] ? MESI[comp[3].toLowerCase()] : m1;
@@ -265,7 +268,7 @@ function parseBill(raw) {
   }
 
   // Sezioni "di cui spesa per la vendita"
-  const DI_CUI = /di cui\s+spesa\s+per\s+la\s+vend\w{2,4}\s+(?:di\s+)?(?:energia\s+elettrica|gas(?:\s+naturale)?)/i;
+  const DI_CUI = /di cui\s+spesa\s+per\s+(?:la\s+)?vend\w{2,4}\s+(?:di\s+)?(?:energia\s+elettrica|gas(?:\s+naturale)?)/i;
   function riga(headRe) {
     const re = new RegExp(headRe.source, 'gi');
     let h;
@@ -287,7 +290,7 @@ function parseBill(raw) {
   };
 
   // Prezzo unitario (Quota per consumi)
-  const rc = riga(/quota\s+(?:per\s+)?consumi/);
+  const rc = riga(/quota\s+(?:per\s+(?:i\s+)?)?consumi/);
   if (rc) {
     const p1 = rc.match(/(\d+,\d{2,6})\s*[€E@]?\s*[\/&|]\s*(kWh|Smc|mc)/i);
     const p2 = rc.match(/€\s*\/\s*(kWh|Smc|mc)\s*(\d+,\d{2,6})/i);
@@ -350,9 +353,9 @@ function parseBill(raw) {
   const hasVar = /\bvariabile\b|indicizzat|\bPUN\b|\bPSV\b|\bTTF\b|\bspread\b/i.test(t);
   const hasFix = /prezzo\s+(?:fisso|bloccato|fissato)|tariffa\s+fissa|offerta\s+(?:a\s+)?prezzo\s+fisso|prezzo\s+della\s+materia\s+prima\s+fisso|\bfisso\s+(?:per|12|24|36)/i.test(t);
   const tipo = t.match(/tipologia\s+offerta\s*:?\s*(fissa|fisso|variabile)/i);
-  const fx = t.match(/formula\s+prevista[^:]{0,80}:\s*(.{5,140}?)[\s|]+(?:indice\s+di\s+riferimento|periodicit)/i);
+  const fx = t.match(/formula\s+(?:prevista[^:]{0,80}:|per\s+la\s+vendita[^)]{0,60}\))\s*(.{5,140}?)[\s|]+(?:indice\s+di\s+riferimento|periodicit)/i);
   const ix = t.match(/indice\s+di\s+riferimento\s*:\s*([A-Za-z]{2,12}(?:\s+Index(?:\s+GME)?)?)/i);
-  const sp = t.match(/spread\s*:\s*(\d+,\d+)\s*€\s*\/\s*(kWh|Smc)/i);
+  const sp = t.match(/spread\s*[:=]\s*(\d+(?:,\d+)?)\s*€\s*\/\s*(kWh|Smc)/i);
   if (tipo) {
     out.tariffa = /variabile/i.test(tipo[1]) ? 'Variabile' : 'Fissa';
     if (out.tariffa === 'Variabile') {
